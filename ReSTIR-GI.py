@@ -15,12 +15,21 @@
 
 # %% [markdown]
 """
-This is an implementation of the ReSTIR-GI paper from 2021 using the Mitsuba3 renderer.
-It was at first a side project of mine and is not on par with the reference
-implementation from Lin Daqi in their [Falcor based Implementation](https://github.com/DQLin/ReSTIR_PT).
-Further, Mitsuba3 is not a real time renderer. My implementation is therefore focused
-more on a readable implementation and might not be the most performant.
+# Implementing ReSTIR-GI 
 
+In this tutorial, we will implement the ReSTIR-GI algorithm in Mitsuba3,
+published in 2021.
+The ReSTIR algorithm and its derivatives have become very popular especially for real 
+time rendering applications. However, as most implementations are focused on
+performance, it can be hard to understand the most common implementations.
+The goal of this tutorial is to provide a Implementation for most of the features
+provided in the original ReSTIR-GI paper while being easy to understand.
+
+Iam not the author of the original paper and my implementatin is originaly an
+implementation for me to learn about Mitsuba3 and the ReSTIR Algorithm.
+Therefore errors can be present in this implementation.
+
+The Original paper can be found under:
 Ouyang, Y., Liu, S., Kettunen, M., Pharr, M., & Pantaleoni, J. (2021). [ReSTIR GI.](https://research.nvidia.com/publication/2021-06_restir-gi-path-resampling-real-time-path-tracing)
 """
 
