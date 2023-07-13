@@ -25,7 +25,7 @@ Ouyang, Y., Liu, S., Kettunen, M., Pharr, M., & Pantaleoni, J. (2021). [ReSTIR G
 """
 
 # %%
-# %pip install mitsuba tqdm
+# %pip install mitsuba tqdm matplotlib
 
 # %% [markdown]
 """
@@ -37,6 +37,7 @@ We also have to specify a variant for Mitsuba3.
 import mitsuba as mi
 import drjit as dr
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 mi.set_variant("cuda_ad_rgb")
 
@@ -875,40 +876,43 @@ Registering the integrator we can use the `RestirIntegrator` like any other
 Mitsuba3 integrator.
 However, the seed has to be different for every frame rendered.
 In this case we are rendering the cornell_box with some modifications to the film.
+For the notebook we are showing the last frame only.
 """
 
 # %%
 
 mi.register_integrator("restirgi", lambda props: RestirIntegrator(props))
 
-if __name__ == "__main__":
-    with dr.suspend_grad():
-        scene = mi.cornell_box()
-        scene["sensor"]["film"]["width"] = 1024
-        scene["sensor"]["film"]["height"] = 1024
-        scene["sensor"]["film"]["rfilter"] = mi.load_dict({"type": "box"})
-        scene: mi.Scene = mi.load_dict(scene)
+with dr.suspend_grad():
+    scene = mi.cornell_box()
+    scene["sensor"]["film"]["width"] = 1024
+    scene["sensor"]["film"]["height"] = 1024
+    scene["sensor"]["film"]["rfilter"] = mi.load_dict({"type": "box"})
+    scene: mi.Scene = mi.load_dict(scene)
 
-        print("Rendering Reference Image:")
-        ref = mi.render(scene, spp=256)
-        mi.util.write_bitmap("out/ref.jpg", ref)
+    print("Rendering Reference Image:")
+    ref = mi.render(scene, spp=256)
+    mi.util.write_bitmap("out/ref.jpg", ref)
 
-        integrator: RestirIntegrator = mi.load_dict(
-            {
-                "type": "restirgi",
-                "jacobian": False,
-                "bias_correction": False,
-                "bsdf_sampling": True,
-                "max_M_spatial": 500,
-                "max_M_temporal": 30,
-                "initial_search_radius": 10,
-            }
-        )
+    integrator: RestirIntegrator = mi.load_dict(
+        {
+            "type": "restirgi",
+            "jacobian": False,
+            "bias_correction": True,
+            "bsdf_sampling": True,
+            "max_M_spatial": 500,
+            "max_M_temporal": 30,
+            "initial_search_radius": 10,
+        }
+    )
 
-        print("ReSTIRGI:")
-        for i in tqdm(range(200)):
-            img = mi.render(scene, integrator=integrator, seed=i, spp=1)
+    print("ReSTIRGI:")
+    for i in tqdm(range(200)):
+        img = mi.render(scene, integrator=integrator, seed=i, spp=1)
 
-            mi.util.write_bitmap(f"out/{i}.jpg", img)
+        mi.util.write_bitmap(f"out/{i}.jpg", img)
+
+    plt.axis("off")
+    plt.imshow(mi.util.convert_to_bitmap(img))
 
 # %%
