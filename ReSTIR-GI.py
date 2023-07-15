@@ -57,7 +57,7 @@ mi.set_variant("cuda_ad_rgb")
 # type hints and automatically constructs the `DRJIT_STRUCT` dict.
 #
 #
-
+#
 
 # %%
 def drjitstruct(cls):
@@ -80,9 +80,9 @@ def drjitstruct(cls):
 # $x_2^q$ that is reused at another visible point $x_1^r$, then the Jacobean
 # determinant [...] accounts for the fact that $x_q^r$ would have itself
 # generated the sample point $x_2^q with a different probability$".
-# In practice, we need to clamp the
+# In practice, we need to clamp the angles since they could cause artifacts otherwise.
 #
-
+#
 
 # %%
 def J(
@@ -103,12 +103,12 @@ def J(
 
 # %% [markdown]
 # The ReSTIR algorithm samples initial samples from a source pdf $p$ and resamples these
-# according to a weights $\omega_i$ where $\omega_i = {\hat p(x_i) \over p(x_i)}$.
+# according to weights $\omega_i$ where $\omega_i = {\hat p(x_i) \over p(x_i)}$.
 # Here, $\hat p$ is proportional to the target distribution that could be intractable.
 #
 #
-# In the original paper proposed two different probability density functions for $\hat p$.
-# In this case we select $\hat p$ to be proportional to the norm of the incomming radiance
+# The original paper proposed two different probability density functions for $\hat p$.
+# In this case we select $\hat p$ to be proportional to the norm of the incoming radiance
 # $L_i(x_v, w_i)$ at the visible point $x_v$.
 # One could also consider other functions such as the luminance of the radiance.
 
@@ -120,10 +120,15 @@ def p_hat(f):
 
 # %% [markdown]
 # In Algorithm 4 of the ReSTIR-GI paper a set Q is described which is used for
-# spatial bias correction a the end.
-#
-# This class implements a `put` method that can be called at every iteration of a loop
-# (we use a python for loop not Mitsuba's loop) to add an element into the set.
+# spatial bias correction at the end.
+# It saves the count `M`, the position and the normal of the visible points for a
+# visibility test.
+# This class implements a `put` method that can be called at every iteration of a loop.
+# Since the lists in this class are Python lists we have to use a Python loop to
+# access the variables at their indices as well.
+# One could also save these variables in a buffer and recall them later, however
+# since the loop has at most 9 iterations this would be an unnecessary
+# performance penalty.
 
 # %%
 
@@ -147,16 +152,19 @@ class ReuseSet:
 
 
 # %% [markdown]
-# Now we can implement the `RestirSample` and `RestirReservoir` as specified in the paper.
+# Now we can implement the `RestirSample` and `RestirReservoir` classes
+# corresponding to the "SAMPLE" and "RESERVOIR" struct from the paper.
 #
-# The update and merge function very similar to the algorithm from the paper.
-# However, Mitsuba3 does not support if statements and we have to use `dr.select` instead.
+# The update and merge functions can be ported directly from the paper and
+# require just minor adaptions such as using `dr.select` instead of an if-clause.
+# One point that caused me some headaches is that we have to construct a new
+# `mi.UInt` to copy the `M` value in the `merge` function as we would otherwise overwrite the old one.
+# Here we can also utilize the `drjitstruct` decorator specified earlier,
+# therefore we have to annotate the class members with their correct Mitsuba3
+# types. 
 #
-# To utelize the `drjitstruct` decorator specified earlier we need to anotate the
-# class members with the correct types.
 #
 #
-
 
 # %%
 @drjitstruct
@@ -212,12 +220,12 @@ class RestirReservoir:
 # integrator class over multiple cells.
 #
 # In the `render` function which we overwrite from `mi.SamplingIntegrator`,
-# we first seed the sampler and calculate the pixel and sample position similar to the
+# we first seed the sampler with `self.n` and calculate the pixel and sample position similar to the
 # default integrator.
 # We also sample in multiple layers if more than 1 sample per pixel was requested.
 #
 # Since the ReSTIR integrator reuses samples from previous frames
-# (invocations of `mi.render`) we keep a internal counter `self.n`.
+# (invocations of `mi.render`) we keep an internal counter `self.n` to seed the sampler and avoid biased results.
 # This variable is then also used to zero-initialize the reservoirs in the first frame.
 #
 # For each frame we also keep a copy of the previous sensor around to reproject
@@ -233,9 +241,10 @@ class RestirReservoir:
 # evaluating the changed state variables in between.
 #
 # In the end we update `self.n` the sensor parameters.
+# This is used for seeding the sampler. 
 #
 #
-
+#
 
 # %%
 class RestirIntegrator(mi.SamplingIntegrator):
@@ -360,10 +369,9 @@ class RestirIntegrator(mi.SamplingIntegrator):
 
 # %% [markdown]
 # To get the index of a pixel coordinate we define a helper function.
+# It returns the index of the reservoir in the same layer.
 #
 #
-#
-
 
 # %%
 def to_idx(self, pos: mi.Vector2u) -> mi.UInt:
@@ -389,7 +397,7 @@ RestirIntegrator.to_idx = to_idx
 # This function implements that test with Mitsuba3.
 #
 #
-
+#
 
 # %%
 def similar(self, s1: RestirSample, s2: RestirSample) -> mi.Bool:
@@ -432,7 +440,7 @@ RestirIntegrator.similar = similar
 # To this end we ported the sampling function from Mitsuba's path integrator to Python.
 #
 #
-
+#
 
 # %%
 def sample_initial(
@@ -648,14 +656,13 @@ RestirIntegrator.sample_ray = sample_ray
 # %% [markdown]
 # The next step is to perform temporal resampling.
 #
-# In this step we first test if the sample in the temporal reservoir at the current pixel
+# Here we first test if the sample in the temporal reservoir at the current pixel
 # is valid i.e. if the sample is similar enough to the sample that previously corresponding
 # to this pixel.
 #
 # To reproject the position of the current sample from the previous sensor position we
 # somewhat abuse the `sample_direction` function of that sensor by constructing a
 # `SurfaceInteraction3f` and populating it with the position of the current sample.
-#
 # Depending on the result of that test we either construct a new reservoir or
 # reuse the old one.
 #
@@ -668,7 +675,7 @@ RestirIntegrator.sample_ray = sample_ray
 # then clamp `M` of the new reservoir and overwrite the old one.
 #
 #
-
+#
 
 # %%
 def temporal_resampling(
@@ -747,7 +754,7 @@ RestirIntegrator.temporal_resampling = temporal_resampling
 # correspond to CUDA registers on the GPU.
 #
 #
-
+#
 
 # %%
 def spatial_resampling(
