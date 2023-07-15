@@ -23,13 +23,14 @@ performance, it can be hard to understand the most common implementations.
 The goal of this tutorial is to provide an Implementation for most of the features
 provided in the original ReSTIR-GI paper while being easy to understand.
 
-Unfortunately some aspects of my implementation do not work yet including Jacobean bias correction.
+Unfortunately some aspects of my implementation do not work jet.
+This mostly includes Jacobean bias correction.
 
 The Original paper can be found under:
 Ouyang, Y., Liu, S., Kettunen, M., Pharr, M., & Pantaleoni, J. (2021). [ReSTIR GI.](https://research.nvidia.com/publication/2021-06_restir-gi-path-resampling-real-time-path-tracing)
 
 ```python
-%pip install mitsuba tqdm matplotlib
+%pip install mitsuba tqdm matplotlib numpy
 ```
 
 First we need to import Mitsuba3 and Dr.Jit
@@ -41,6 +42,7 @@ import drjit as dr
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+import numpy as np
 
 mi.set_variant("cuda_ad_rgb")
 ```
@@ -54,7 +56,6 @@ struct members.
 The `RestirReservoir` and `RestirSample` both use this feature.\
 To avoid having to repeat the type specification we can write a decorator that takes the\
 type hints and automatically constructs the `DRJIT_STRUCT` dict.
-
 
 
 
@@ -82,7 +83,6 @@ $x_2^q$ that is reused at another visible point $x_1^r$, then the Jacobean
 determinant [...] accounts for the fact that $x_q^r$ would have itself
 generated the sample point $x_2^q with a different probability$".
 In practice, we need to clamp the angles since they could cause artifacts otherwise.
-
 
 
 
@@ -172,7 +172,6 @@ types.
 
 
 
-
 ```python
 @drjitstruct
 class RestirSample:
@@ -249,7 +248,6 @@ evaluating the changed state variables in between.
 
 In the end we update `self.n` the sensor parameters.
 This is used for seeding the sampler.
-
 
 
 
@@ -383,7 +381,6 @@ It returns the index of the reservoir in the same layer.
 
 
 
-
 ```python
 def to_idx(self, pos: mi.Vector2u) -> mi.UInt:
     """Converts a screen space image position to a reservoir index depending on the sample layer.
@@ -406,7 +403,6 @@ RestirIntegrator.to_idx = to_idx
 In the paper, a similarity test is proposed that is used to tell if two reservoirs
 should be merged when performing spatial resampling.
 This function implements that test with Mitsuba3.
-
 
 
 
@@ -451,7 +447,6 @@ to acquire the sample position and normal ($x_s, n_s$).
 The incoming radiance $L_i(x_v, \omega_i)$ at point $x_v$ in a direction $\omaga_i$ is
 also calculated using the `sample_ray` function.
 To this end we ported the sampling function from Mitsuba's path integrator to Python.
-
 
 
 
@@ -693,7 +688,6 @@ then clamp `M` of the new reservoir and overwrite the old one.
 
 
 
-
 ```python
 def temporal_resampling(
     self,
@@ -769,7 +763,6 @@ Since a Dr.Jit loop is only run once in Python to record the computations, it
 is not easily possible to access the elements in the list of `Q`.
 Note, that for Dr.Jit the list looks like any other set of variables which
 correspond to CUDA registers on the GPU.
-
 
 
 
@@ -930,8 +923,7 @@ with dr.suspend_grad():
     scene["sensor"]["film"]["width"] = 1024
     scene["sensor"]["film"]["height"] = 1024
     scene["sensor"]["film"]["rfilter"] = mi.load_dict({"type": "box"})
-    # scene: mi.Scene = mi.load_dict(scene)
-    scene = mi.load_file("data/scenes/staircase/scene.xml")
+    scene: mi.Scene = mi.load_dict(scene)
 
     print("Rendering Reference Image:")
     ref = mi.render(scene, spp=256)
@@ -955,11 +947,17 @@ with dr.suspend_grad():
         img = mi.render(scene, integrator=integrator, spp=1)
 
         mi.util.write_bitmap(f"out/{i}.jpg", img)
-        imgs.append(img)
 
-    plt.axis("off")
-    plt.imshow(mi.util.convert_to_bitmap(img))
+        if (i + 1) % 50 == 0:
+            imgs.append((i, img))
+
+    fig, ax = plt.subplots(1, len(imgs), figsize=(10, 40))
+    for i in range(len(imgs)):
+        ax[i].axis("off")
+        ax[i].imshow(mi.util.convert_to_bitmap(imgs[i][1]))
+        ax[i].set_title(f"Frame {imgs[i][0]}")
 ```
+
 
 ```python
 
