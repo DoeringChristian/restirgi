@@ -1,65 +1,64 @@
-# ---
-# jupyter:
-#   jupytext:
-#     formats: ipynb,py:percent,md
-#     text_representation:
-#       extension: .py
-#       format_name: percent
-#       format_version: '1.3'
-#       jupytext_version: 1.14.6
-#   kernelspec:
-#     display_name: Python 3 (ipykernel)
-#     language: python
-#     name: python3
-# ---
+---
+jupyter:
+  jupytext:
+    formats: ipynb,py:percent,md
+    text_representation:
+      extension: .md
+      format_name: markdown
+      format_version: '1.3'
+      jupytext_version: 1.14.6
+  kernelspec:
+    display_name: Python 3 (ipykernel)
+    language: python
+    name: python3
+---
 
-# %% [markdown]
-# # Implementing ReSTIR-GI
-#
-# In this tutorial, we will implement the ReSTIR-GI algorithm in Mitsuba3,
-# published in 2021.
-# The ReSTIR algorithm and its derivatives have become very popular especially for real
-# time rendering applications. However, as most implementations are focused on
-# performance, it can be hard to understand the most common implementations.
-# The goal of this tutorial is to provide an Implementation for most of the features
-# provided in the original ReSTIR-GI paper while being easy to understand.
-#
-# Unfortunately some aspects of my implementation do not work jet.
-# This mostly includes Jacobean bias correction.
-#
-# The Original paper can be found under:
-# Ouyang, Y., Liu, S., Kettunen, M., Pharr, M., & Pantaleoni, J. (2021). [ReSTIR GI.](https://research.nvidia.com/publication/2021-06_restir-gi-path-resampling-real-time-path-tracing)
+# Implementing ReSTIR-GI
 
-# %%
-# %pip install mitsuba tqdm matplotlib
+In this tutorial, we will implement the ReSTIR-GI algorithm in Mitsuba3,
+published in 2021.
+The ReSTIR algorithm and its derivatives have become very popular especially for real
+time rendering applications. However, as most implementations are focused on
+performance, it can be hard to understand the most common implementations.
+The goal of this tutorial is to provide an Implementation for most of the features
+provided in the original ReSTIR-GI paper while being easy to understand.
 
-# %% [markdown]
-# First we need to import Mitsuba3 and Dr.Jit
-# We also have to specify a variant for Mitsuba3.
+Unfortunately some aspects of my implementation do not work jet.
+This mostly includes Jacobean bias correction.
 
-# %%
+The Original paper can be found under:
+Ouyang, Y., Liu, S., Kettunen, M., Pharr, M., & Pantaleoni, J. (2021). [ReSTIR GI.](https://research.nvidia.com/publication/2021-06_restir-gi-path-resampling-real-time-path-tracing)
+
+```python
+%pip install mitsuba tqdm matplotlib
+```
+
+First we need to import Mitsuba3 and Dr.Jit
+We also have to specify a variant for Mitsuba3.
+
+```python
 import mitsuba as mi
 import drjit as dr
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 mi.set_variant("cuda_ad_rgb")
+```
 
 
-# %% [markdown]
-# Dr.Jit supports creating custom structs, which allow us to zero-initialize members as
-# well as gathering/scattering them from/into arrays.\
-# By declaring a `DRJIT_STRUCT` dictionary in the class we can specify the names and types of our
-# struct members.
-#
-# The `RestirReservoir` and `RestirSample` both use this feature.\
-# To avoid having to repeat the type specification we can write a decorator that takes the\
-# type hints and automatically constructs the `DRJIT_STRUCT` dict.
-#
-#
+Dr.Jit supports creating custom structs, which allow us to zero-initialize members as
+well as gathering/scattering them from/into arrays.\
+By declaring a `DRJIT_STRUCT` dictionary in the class we can specify the names and types of our
+struct members.
+
+The `RestirReservoir` and `RestirSample` both use this feature.\
+To avoid having to repeat the type specification we can write a decorator that takes the\
+type hints and automatically constructs the `DRJIT_STRUCT` dict.
 
 
-# %%
+
+
+```python
 def drjitstruct(cls):
     from typing import get_type_hints
 
@@ -71,20 +70,20 @@ def drjitstruct(cls):
         drjit_struct[name] = ty
     cls.DRJIT_STRUCT = drjit_struct
     return cls
+```
 
 
-# %% [markdown]
-# The ReSTIR-GI paper has several bias correction steps, one of which is Jacobean
-# bias correction.
-# To quote the paper, "If a visible point $x_1^q$ generates a sample point
-# $x_2^q$ that is reused at another visible point $x_1^r$, then the Jacobean
-# determinant [...] accounts for the fact that $x_q^r$ would have itself
-# generated the sample point $x_2^q with a different probability$".
-# In practice, we need to clamp the
-#
+The ReSTIR-GI paper has several bias correction steps, one of which is Jacobean
+bias correction.
+To quote the paper, "If a visible point $x_1^q$ generates a sample point
+$x_2^q$ that is reused at another visible point $x_1^r$, then the Jacobean
+determinant [...] accounts for the fact that $x_q^r$ would have itself
+generated the sample point $x_2^q with a different probability$".
+In practice, we need to clamp the angles since they could cause artifacts otherwise.
 
 
-# %%
+
+```python
 def J(
     xr1: mi.Vector3f, xq1: mi.Vector3f, xq2: mi.Vector3f, nq2: mi.Vector3f
 ) -> mi.Float:
@@ -99,33 +98,40 @@ def J(
     div = cos_phi_q * dr.sqr(norm_rq)
     jacobian = dr.select(div > 0, cos_phi_r * dr.sqr(nrom_qq) / div, 0)
     return jacobian
+```
 
 
-# %% [markdown]
-# The ReSTIR algorithm samples initial samples from a source pdf $p$ and resamples these
-# according to a weights $\omega_i$ where $\omega_i = {\hat p(x_i) \over p(x_i)}$.
-# Here, $\hat p$ is proportional to the target distribution that could be intractable.
-#
-#
-# In the original paper proposed two different probability density functions for $\hat p$.
-# In this case we select $\hat p$ to be proportional to the norm of the incomming radiance
-# $L_i(x_v, w_i)$ at the visible point $x_v$.
-# One could also consider other functions such as the luminance of the radiance.
+<!-- #region -->
+The ReSTIR algorithm samples initial samples from a source pdf $p$ and resamples these
+according to weights $\omega_i$ where $\omega_i = {\hat p(x_i) \over p(x_i)}$.
+Here, $\hat p$ is proportional to the target distribution that could be intractable.
 
 
-# %%
+The original paper proposed two different probability density functions for $\hat p$.
+In this case we select $\hat p$ to be proportional to the norm of the incoming radiance
+$L_i(x_v, w_i)$ at the visible point $x_v$.
+One could also consider other functions such as the luminance of the radiance.
+<!-- #endregion -->
+
+
+```python
 def p_hat(f):
     return dr.norm(f)
+```
 
 
-# %% [markdown]
-# In Algorithm 4 of the ReSTIR-GI paper a set Q is described which is used for
-# spatial bias correction a the end.
-#
-# This class implements a `put` method that can be called at every iteration of a loop
-# (we use a python for loop not Mitsuba's loop) to add an element into the set.
+In Algorithm 4 of the ReSTIR-GI paper a set Q is described which is used for
+spatial bias correction at the end.
+It saves the count `M`, the position and the normal of the visible points for a
+visibility test.
+This class implements a `put` method that can be called at every iteration of a loop.
+Since the lists in this class are Python lists we have to use a Python loop to
+access the variables at their indices as well.
+One could also save these variables in a buffer and recall them later, however
+since the loop has at most 9 iterations this would be an unnecessary
+performance penalty.
 
-# %%
+```python
 
 
 class ReuseSet:
@@ -144,21 +150,24 @@ class ReuseSet:
     def __len__(self) -> int:
         assert len(self.M) == len(self.p) == len(self.active) == len(self.n)
         return len(self.M)
+```
 
 
-# %% [markdown]
-# Now we can implement the `RestirSample` and `RestirReservoir` as specified in the paper.
-#
-# The update and merge function very similar to the algorithm from the paper.
-# However, Mitsuba3 does not support if statements and we have to use `dr.select` instead.
-#
-# To utelize the `drjitstruct` decorator specified earlier we need to anotate the
-# class members with the correct types.
-#
-#
+Now we can implement the `RestirSample` and `RestirReservoir` classes
+corresponding to the "SAMPLE" and "RESERVOIR" struct from the paper.
+
+The update and merge functions can be ported directly from the paper and
+require just minor adaptions such as using `dr.select` instead of an if-clause.
+One point that caused me some headaches is that we have to construct a new
+`mi.UInt` to copy the `M` value in the `merge` function as we would otherwise overwrite the old one.
+Here we can also utilize the `drjitstruct` decorator specified earlier,
+therefore we have to annotate the class members with their correct Mitsuba3
+types. 
 
 
-# %%
+
+
+```python
 @drjitstruct
 class RestirSample:
     x_v: mi.Vector3f
@@ -204,40 +213,41 @@ class RestirReservoir:
         )  # We have to construct a new UInt so we don't overwrite `self.M`
         self.update(sampler, r.z, p * r.W * r.M, active)
         self.M = dr.select(active, M0 + r.M, M0)
+```
 
 
-# %% [markdown]
-# Finally, we can implement our Integrator.
-# In this tutorial we will use monkey patching to split up the
-# integrator class over multiple cells.
-#
-# In the `render` function which we overwrite from `mi.SamplingIntegrator`,
-# we first seed the sampler and calculate the pixel and sample position similar to the
-# default integrator.
-# We also sample in multiple layers if more than 1 sample per pixel was requested.
-#
-# Since the ReSTIR integrator reuses samples from previous frames
-# (invocations of `mi.render`) we keep a internal counter `self.n`.
-# This variable is then also used to zero-initialize the reservoirs in the first frame.
-#
-# For each frame we also keep a copy of the previous sensor around to reproject
-# temporal samples to new pixels in the temporal resampling step.
-#
-# We then perform the main Sampling/Resampling algorithm by successively calling:\
-#     - `sample_initial` for generating initial samples\
-#     - `temporal_resampling` for resampling from previous frames\
-#     - `spatial_resampling` for resampling from neighboring pixels\
-#     - `render_final` for rendering the final image\
-#
-# To get the rendering time down we also split this part into multiple kernels by
-# evaluating the changed state variables in between.
-#
-# In the end we update `self.n` the sensor parameters.
-#
-#
+Finally, we can implement our Integrator.
+In this tutorial we will use monkey patching to split up the
+integrator class over multiple cells.
+
+In the `render` function which we overwrite from `mi.SamplingIntegrator`,
+we first seed the sampler with `self.n` and calculate the pixel and sample position similar to the
+default integrator.
+We also sample in multiple layers if more than 1 sample per pixel was requested.
+
+Since the ReSTIR integrator reuses samples from previous frames
+(invocations of `mi.render`) we keep an internal counter `self.n` to seed the sampler and avoid biased results.
+This variable is then also used to zero-initialize the reservoirs in the first frame.
+
+For each frame we also keep a copy of the previous sensor around to reproject
+temporal samples to new pixels in the temporal resampling step.
+
+We then perform the main Sampling/Resampling algorithm by successively calling:\
+    - `sample_initial` for generating initial samples\
+    - `temporal_resampling` for resampling from previous frames\
+    - `spatial_resampling` for resampling from neighboring pixels\
+    - `render_final` for rendering the final image\
+
+To get the rendering time down we also split this part into multiple kernels by
+evaluating the changed state variables in between.
+
+In the end we update `self.n` the sensor parameters.
+This is used for seeding the sampler. 
 
 
-# %%
+
+
+```python
 class RestirIntegrator(mi.SamplingIntegrator):
     dist_threshold = 0.1
     angle_threshold = 25 * dr.pi / 180
@@ -356,16 +366,15 @@ class RestirIntegrator(mi.SamplingIntegrator):
         self.prev_sample = self.sample
 
         return img
+```
 
 
-# %% [markdown]
-# To get the index of a pixel coordinate we define a helper function.
-#
-#
-#
+To get the index of a pixel coordinate we define a helper function.
+It returns the index of the reservoir in the same layer.
 
 
-# %%
+
+```python
 def to_idx(self, pos: mi.Vector2u) -> mi.UInt:
     """Converts a screen space image position to a reservoir index depending on the sample layer.
 
@@ -381,17 +390,17 @@ def to_idx(self, pos: mi.Vector2u) -> mi.UInt:
 
 
 RestirIntegrator.to_idx = to_idx
+```
 
 
-# %% [markdown]
-# In the paper, a similarity test is proposed that is used to tell if two reservoirs
-# should be merged when performing spatial resampling.
-# This function implements that test with Mitsuba3.
-#
-#
+In the paper, a similarity test is proposed that is used to tell if two reservoirs
+should be merged when performing spatial resampling.
+This function implements that test with Mitsuba3.
 
 
-# %%
+
+
+```python
 def similar(self, s1: RestirSample, s2: RestirSample) -> mi.Bool:
     """Similarity test from the paper, testing if two points are similar enough.
 
@@ -410,31 +419,31 @@ def similar(self, s1: RestirSample, s2: RestirSample) -> mi.Bool:
 
 
 RestirIntegrator.similar = similar
+```
 
 
-# %% [markdown]
-# The first step in the ReSTIR-GI pipeline is to generate initial samples.
-#
-# This function is relatively straight forward.
-# After generating an initial ray we acquire the corresponding visible
-# point and normal ($x_v, n_v$) by tracing that ray over the scene.
-# We also save the emittance at this point to use in the `render_final` function.
-#
-# The next step is to either sample the BSDF pdf or the hemisphere uniformly
-# to get a new direction.
-# Both options where described in the paper, however BSDF sampling seems to work better
-# with Mitsuba3.
-# We then save the probability density function into the sample and spawn a new ray
-# to acquire the sample position and normal ($x_s, n_s$).
-#
-# The incoming radiance $L_i(x_v, \omega_i)$ at point $x_v$ in a direction $\omaga_i$ is
-# also calculated using the `sample_ray` function.
-# To this end we ported the sampling function from Mitsuba's path integrator to Python.
-#
-#
+The first step in the ReSTIR-GI pipeline is to generate initial samples.
+
+This function is relatively straight forward.
+After generating an initial ray we acquire the corresponding visible
+point and normal ($x_v, n_v$) by tracing that ray over the scene.
+We also save the emittance at this point to use in the `render_final` function.
+
+The next step is to either sample the BSDF pdf or the hemisphere uniformly
+to get a new direction.
+Both options where described in the paper, however BSDF sampling seems to work better
+with Mitsuba3.
+We then save the probability density function into the sample and spawn a new ray
+to acquire the sample position and normal ($x_s, n_s$).
+
+The incoming radiance $L_i(x_v, \omega_i)$ at point $x_v$ in a direction $\omaga_i$ is
+also calculated using the `sample_ray` function.
+To this end we ported the sampling function from Mitsuba's path integrator to Python.
 
 
-# %%
+
+
+```python
 def sample_initial(
     self,
     scene: mi.Scene,
@@ -643,34 +652,33 @@ def sample_ray(
 
 
 RestirIntegrator.sample_ray = sample_ray
+```
 
 
-# %% [markdown]
-# The next step is to perform temporal resampling.
-#
-# In this step we first test if the sample in the temporal reservoir at the current pixel
-# is valid i.e. if the sample is similar enough to the sample that previously corresponding
-# to this pixel.
-#
-# To reproject the position of the current sample from the previous sensor position we
-# somewhat abuse the `sample_direction` function of that sensor by constructing a
-# `SurfaceInteraction3f` and populating it with the position of the current sample.
-#
-# Depending on the result of that test we either construct a new reservoir or
-# reuse the old one.
-#
-# Clamping the parameter `M` of the reservoir to prevent
-# stale samples is mentioned.
-# This does not work if we simply where to limit that parameter and not merge the
-# reservoir.
-# Therefore, we construct a new reservoir `Rnew` and merge the old one into it.
-# We also update this new reservoir with the new sample generated in this frame and
-# then clamp `M` of the new reservoir and overwrite the old one.
-#
-#
+The next step is to perform temporal resampling.
+
+Here we first test if the sample in the temporal reservoir at the current pixel
+is valid i.e. if the sample is similar enough to the sample that previously corresponding
+to this pixel.
+
+To reproject the position of the current sample from the previous sensor position we
+somewhat abuse the `sample_direction` function of that sensor by constructing a
+`SurfaceInteraction3f` and populating it with the position of the current sample.
+Depending on the result of that test we either construct a new reservoir or
+reuse the old one.
+
+Clamping the parameter `M` of the reservoir to prevent
+stale samples is mentioned.
+This does not work if we simply where to limit that parameter and not merge the
+reservoir.
+Therefore, we construct a new reservoir `Rnew` and merge the old one into it.
+We also update this new reservoir with the new sample generated in this frame and
+then clamp `M` of the new reservoir and overwrite the old one.
 
 
-# %%
+
+
+```python
 def temporal_resampling(
     self,
     sampler: mi.Sampler,
@@ -726,30 +734,30 @@ def temporal_resampling(
 
 
 RestirIntegrator.temporal_resampling = temporal_resampling
+```
 
 
-# %% [markdown]
-# Similarly to temporal resampling, spatial resampling reuses samples from nearby pixels.
-#
-# The first step is again to construct a new reservoir `Rnew` to allow for clamping `M`.
-# Depending on whether we want to enable reuse from previous spatial reservoirs,
-# the old spatial reservoir is merged into the new one.
-# We then calculate the maximum number of iterations according to the criterion outlined
-# in the paper.
-# To determine if the search radius should be decreased (if no samples could be reused) we also initialize the
-# boolean `any_reused`.
-#
-# The main spatial resampling loop cannot be a Dr.Jit loop because we have to calculate
-# the spatial bias correction factor at the end using values added to the set `Q`.
-# Since a Dr.Jit loop is only run once in Python to record the computations, it
-# is not easily possible to access the elements in the list of `Q`.
-# Note, that for Dr.Jit the list looks like any other set of variables which
-# correspond to CUDA registers on the GPU.
-#
-#
+Similarly to temporal resampling, spatial resampling reuses samples from nearby pixels.
+
+The first step is again to construct a new reservoir `Rnew` to allow for clamping `M`.
+Depending on whether we want to enable reuse from previous spatial reservoirs,
+the old spatial reservoir is merged into the new one.
+We then calculate the maximum number of iterations according to the criterion outlined
+in the paper.
+To determine if the search radius should be decreased (if no samples could be reused) we also initialize the
+boolean `any_reused`.
+
+The main spatial resampling loop cannot be a Dr.Jit loop because we have to calculate
+the spatial bias correction factor at the end using values added to the set `Q`.
+Since a Dr.Jit loop is only run once in Python to record the computations, it
+is not easily possible to access the elements in the list of `Q`.
+Note, that for Dr.Jit the list looks like any other set of variables which
+correspond to CUDA registers on the GPU.
 
 
-# %%
+
+
+```python
 def spatial_resampling(
     self,
     scene: mi.Scene,
@@ -848,17 +856,17 @@ def spatial_resampling(
 
 
 RestirIntegrator.spatial_resampling = spatial_resampling
+```
 
 
-# %% [markdown]
-# Finally, we can implement the function, that calculates the image for this frame.
-# According to the ReSTIR algorithm the target integral is equal to
-# $\hat L = {f(x_s) \over \hat p(x_s)} {1 \over M} \sum^M_{i = 1}{\hat p(x_i) \over p(x_i)}$
-# In this case $\text{R.W} = {1 \over \hat p(x_s)} {1 \over M} \sum^M_{i = 1}{\hat p(x_i) \over p(x_i)}$.
-# Evaluating the BSDF and adding the emittance we can compute the outgoing radiance
-# towards the sensor.
+Finally, we can implement the function, that calculates the image for this frame.
+According to the ReSTIR algorithm the target integral is equal to
+$\hat L = {f(x_s) \over \hat p(x_s)} {1 \over M} \sum^M_{i = 1}{\hat p(x_i) \over p(x_i)}$
+In this case $\text{R.W} = {1 \over \hat p(x_s)} {1 \over M} \sum^M_{i = 1}{\hat p(x_i) \over p(x_i)}$.
+Evaluating the BSDF and adding the emittance we can compute the outgoing radiance
+towards the sensor.
 
-# %%
+```python
 
 
 def render_final(self) -> mi.Color3f:
@@ -883,18 +891,18 @@ def render_final(self) -> mi.Color3f:
 
 
 RestirIntegrator.render_final = render_final
+```
 
-# %% [markdown]
-# Now we can register the `RestirIntegrator` with Mitsuba3 and render some images.
-# We use the default Cornell Box scene and modify its resolution as well as the reconstruction filter.
-#
-# Registering the integrator we can use the `RestirIntegrator` like any other
-# Mitsuba3 integrator.
-# However, the seed has to be different for every frame rendered.
-# In this case we are rendering the cornell_box with some modifications to the film.
-# For the notebook we are showing the last frame only.
+Now we can register the `RestirIntegrator` with Mitsuba3 and render some images.
+We use the default Cornell Box scene and modify its resolution as well as the reconstruction filter.
 
-# %%
+Registering the integrator we can use the `RestirIntegrator` like any other
+Mitsuba3 integrator.
+However, the seed has to be different for every frame rendered.
+In this case we are rendering the cornell_box with some modifications to the film.
+For the notebook we are showing the last frame only.
+
+```python
 
 mi.register_integrator("restirgi", lambda props: RestirIntegrator(props))
 
@@ -929,5 +937,8 @@ with dr.suspend_grad():
 
     plt.axis("off")
     plt.imshow(mi.util.convert_to_bitmap(img))
+```
 
-# %%
+```python
+
+```
