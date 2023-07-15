@@ -31,7 +31,7 @@
 # Ouyang, Y., Liu, S., Kettunen, M., Pharr, M., & Pantaleoni, J. (2021). [ReSTIR GI.](https://research.nvidia.com/publication/2021-06_restir-gi-path-resampling-real-time-path-tracing)
 
 # %%
-# %pip install mitsuba tqdm matplotlib numpy
+# %pip install mitsuba tqdm matplotlib
 
 # %% [markdown]
 # First we need to import Mitsuba3 and Dr.Jit
@@ -42,8 +42,6 @@ import mitsuba as mi
 import drjit as dr
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-import matplotlib.animation as animation
-import numpy as np
 
 mi.set_variant("cuda_ad_rgb")
 
