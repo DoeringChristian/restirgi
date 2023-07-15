@@ -24,13 +24,14 @@
 # The goal of this tutorial is to provide an Implementation for most of the features
 # provided in the original ReSTIR-GI paper while being easy to understand.
 #
-# Unfortunately some aspects of my implementation do not work yet including Jacobean bias correction.
+# Unfortunately some aspects of my implementation do not work jet.
+# This mostly includes Jacobean bias correction.
 #
 # The Original paper can be found under:
 # Ouyang, Y., Liu, S., Kettunen, M., Pharr, M., & Pantaleoni, J. (2021). [ReSTIR GI.](https://research.nvidia.com/publication/2021-06_restir-gi-path-resampling-real-time-path-tracing)
 
 # %%
-# %pip install mitsuba tqdm matplotlib
+# %pip install mitsuba tqdm matplotlib numpy
 
 # %% [markdown]
 # First we need to import Mitsuba3 and Dr.Jit
@@ -42,6 +43,7 @@ import drjit as dr
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+import numpy as np
 
 mi.set_variant("cuda_ad_rgb")
 
@@ -58,7 +60,7 @@ mi.set_variant("cuda_ad_rgb")
 #
 #
 #
-#
+
 
 # %%
 def drjitstruct(cls):
@@ -84,7 +86,7 @@ def drjitstruct(cls):
 # In practice, we need to clamp the angles since they could cause artifacts otherwise.
 #
 #
-#
+
 
 # %%
 def J(
@@ -167,7 +169,7 @@ class ReuseSet:
 #
 #
 #
-#
+
 
 # %%
 @drjitstruct
@@ -248,7 +250,7 @@ class RestirReservoir:
 #
 #
 #
-#
+
 
 # %%
 class RestirIntegrator(mi.SamplingIntegrator):
@@ -376,7 +378,7 @@ class RestirIntegrator(mi.SamplingIntegrator):
 # It returns the index of the reservoir in the same layer.
 #
 #
-#
+
 
 # %%
 def to_idx(self, pos: mi.Vector2u) -> mi.UInt:
@@ -403,7 +405,7 @@ RestirIntegrator.to_idx = to_idx
 #
 #
 #
-#
+
 
 # %%
 def similar(self, s1: RestirSample, s2: RestirSample) -> mi.Bool:
@@ -447,7 +449,7 @@ RestirIntegrator.similar = similar
 #
 #
 #
-#
+
 
 # %%
 def sample_initial(
@@ -683,7 +685,7 @@ RestirIntegrator.sample_ray = sample_ray
 #
 #
 #
-#
+
 
 # %%
 def temporal_resampling(
@@ -763,7 +765,7 @@ RestirIntegrator.temporal_resampling = temporal_resampling
 #
 #
 #
-#
+
 
 # %%
 def spatial_resampling(
@@ -944,9 +946,15 @@ with dr.suspend_grad():
         img = mi.render(scene, integrator=integrator, spp=1)
 
         mi.util.write_bitmap(f"out/{i}.jpg", img)
-        imgs.append(img)
 
-    plt.axis("off")
-    plt.imshow(mi.util.convert_to_bitmap(img))
+        if (i + 1) % 50 == 0:
+            imgs.append((i, img))
+
+    fig, ax = plt.subplots(1, len(imgs), figsize=(10, 40))
+    for i in range(len(imgs)):
+        ax[i].axis("off")
+        ax[i].imshow(mi.util.convert_to_bitmap(imgs[i][1]))
+        ax[i].set_title(f"Frame {imgs[i][0]}")
+
 
 # %%
