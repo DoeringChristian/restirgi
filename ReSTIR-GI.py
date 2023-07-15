@@ -894,12 +894,13 @@ RestirIntegrator.render_final = render_final
 # %% [markdown]
 # Now we can register the `RestirIntegrator` with Mitsuba3 and render some images.
 # We use the default Cornell Box scene and modify its resolution as well as the reconstruction filter.
-#
-# Registering the integrator we can use the `RestirIntegrator` like any other
-# Mitsuba3 integrator.
-# However, the seed has to be different for every frame rendered.
-# In this case we are rendering the cornell_box with some modifications to the film.
-# For the notebook we are showing the last frame only.
+# Note, that we do not have to set the seed as we use an internal variable that
+# is incremented every time the `render` function gets called.
+# One could also conceive more elaborate setups such as a moving camera or a more
+# complex scene to test the Integrator.
+# We render the scene for 200 frames with 1spp for every frame.
+# The images are written to a `out/` directory and in the notebook only the last
+# frame is shown.
 
 # %%
 
