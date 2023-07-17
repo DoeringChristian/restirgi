@@ -24,8 +24,7 @@
 # The goal of this tutorial is to provide an Implementation for most of the features
 # provided in the original ReSTIR-GI paper while being easy to understand.
 #
-# Unfortunately some aspects of my implementation do not work jet.
-# This mostly includes Jacobean bias correction.
+# Unfortunately some aspects of my implementation do not work yet, including Jacobean bias correction.
 #
 # The Original paper can be found under:
 # Ouyang, Y., Liu, S., Kettunen, M., Pharr, M., & Pantaleoni, J. (2021). [ReSTIR GI.](https://research.nvidia.com/publication/2021-06_restir-gi-path-resampling-real-time-path-tracing)
@@ -58,7 +57,7 @@ mi.set_variant("cuda_ad_rgb")
 #
 #
 #
-
+#
 
 # %%
 def drjitstruct(cls):
@@ -84,7 +83,7 @@ def drjitstruct(cls):
 # In practice, we need to clamp the angles since they could cause artifacts otherwise.
 #
 #
-
+#
 
 # %%
 def J(
@@ -167,7 +166,7 @@ class ReuseSet:
 #
 #
 #
-
+#
 
 # %%
 @drjitstruct
@@ -248,7 +247,7 @@ class RestirReservoir:
 #
 #
 #
-
+#
 
 # %%
 class RestirIntegrator(mi.SamplingIntegrator):
@@ -376,7 +375,7 @@ class RestirIntegrator(mi.SamplingIntegrator):
 # It returns the index of the reservoir in the same layer.
 #
 #
-
+#
 
 # %%
 def to_idx(self, pos: mi.Vector2u) -> mi.UInt:
@@ -403,7 +402,7 @@ RestirIntegrator.to_idx = to_idx
 #
 #
 #
-
+#
 
 # %%
 def similar(self, s1: RestirSample, s2: RestirSample) -> mi.Bool:
@@ -447,7 +446,7 @@ RestirIntegrator.similar = similar
 #
 #
 #
-
+#
 
 # %%
 def sample_initial(
@@ -683,7 +682,7 @@ RestirIntegrator.sample_ray = sample_ray
 #
 #
 #
-
+#
 
 # %%
 def temporal_resampling(
@@ -763,7 +762,7 @@ RestirIntegrator.temporal_resampling = temporal_resampling
 #
 #
 #
-
+#
 
 # %%
 def spatial_resampling(

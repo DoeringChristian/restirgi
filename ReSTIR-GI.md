@@ -23,8 +23,7 @@ performance, it can be hard to understand the most common implementations.
 The goal of this tutorial is to provide an Implementation for most of the features
 provided in the original ReSTIR-GI paper while being easy to understand.
 
-Unfortunately some aspects of my implementation do not work jet.
-This mostly includes Jacobean bias correction.
+Unfortunately some aspects of my implementation do not work yet, including Jacobean bias correction.
 
 The Original paper can be found under:
 Ouyang, Y., Liu, S., Kettunen, M., Pharr, M., & Pantaleoni, J. (2021). [ReSTIR GI.](https://research.nvidia.com/publication/2021-06_restir-gi-path-resampling-real-time-path-tracing)
